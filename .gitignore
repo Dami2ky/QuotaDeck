@@ -1,0 +1,11 @@
+# Swift / SPM 构建产物
+.build/
+.swiftpm/
+build/
+
+# macOS
+.DS_Store
+
+# Xcode(本项目用不到,防止误生成)
+*.xcodeproj
+xcuserdata/
