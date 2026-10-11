@@ -30,9 +30,12 @@ public struct GLMProvider: QuotaProvider {
         var gotRemote = false
         if !cfg.glm.apiKey.isEmpty {
             do {
-                let win = try await fetchQuotaLimit(cfg, &raws)
+                let (win, level) = try await fetchQuotaLimit(cfg, &raws)
                 status.windows.append(contentsOf: win)
                 gotRemote = !win.isEmpty
+                if let level, !level.isEmpty {
+                    status.subtitle = (status.subtitle ?? "") + " · \(level)"
+                }
             } catch {
                 raws.append("quota/limit 失败: \(error.localizedDescription)")
             }
@@ -84,8 +87,8 @@ public struct GLMProvider: QuotaProvider {
         return status
     }
 
-    /// quota/limit 接口 → 窗口列表
-    func fetchQuotaLimit(_ cfg: AppConfig, _ raws: inout [String]) async throws -> [QuotaWindow] {
+    /// quota/limit 接口 → (窗口列表, 套餐档位)
+    func fetchQuotaLimit(_ cfg: AppConfig, _ raws: inout [String]) async throws -> ([QuotaWindow], String?) {
         var base = cfg.glm.quotaBase
         if base.hasSuffix("/") { base.removeLast() }
         var url = base + "/api/monitor/usage/quota/limit"
@@ -98,14 +101,18 @@ public struct GLMProvider: QuotaProvider {
               let limits = JSON.array(JSON.dict(dataObj)?["limits"]), !limits.isEmpty
         else { throw HTTPError.httpStatus(resp.statusCode, "响应缺少 data.limits") }
 
-        return limits.map(mapLimit)
+        return (limits.map(mapLimit), JSON.string(dataObj, "level"))
     }
 
+    /// 字段语义(2026-10-12 lite 套餐实测校准):
+    ///   usage = 额度上限(credits);currentValue = 已用;remaining = 剩余;
+    ///   percentage = 已用百分比(currentValue/usage 实测吻合);number = 窗口长度(5/1),不是额度;
+    ///   unit:3=5h 窗,6=周窗;data.level = 套餐档位
     func mapLimit(_ limit: [String: Any]) -> QuotaWindow {
         let type = JSON.string(limit, "type") ?? ""
-        let unit = JSON.string(limit, "unit") ?? ""
-        let cap = JSON.double(limit, "number")
-        let used = JSON.double(limit, "usage") ?? JSON.double(limit, "currentValue")
+        let unit = JSON.double(limit, "unit")
+        let cap = JSON.double(limit, "usage")
+        let usedNow = JSON.double(limit, "currentValue")
         let remaining = JSON.double(limit, "remaining")
         let percentage = JSON.double(limit, "percentage")
         let reset = JSON.date(limit, "nextResetTime")
@@ -120,27 +127,27 @@ public struct GLMProvider: QuotaProvider {
         } else {
             kind = .other
         }
-        // unit 数字语义(ClaudeBar 对照验证):3=5h 窗,6=周窗,7=月窗——type 识别不出时按 unit 兜底
-        if kind == .other, let u = JSON.double(limit, "unit") {
+        if kind == .other, let u = unit {
             if u == 3 { kind = .fiveHour }
             else if u == 6 { kind = .weekly }
         }
 
-        var frac: Double?
+        // 余量比例优先级:remaining/usage → 1 - percentage(已用) → 1 - currentValue/usage
+        var frac: Double? = nil
         if let r = remaining, let c = cap, c > 0 {
             frac = min(1, max(0, r / c))
         } else if let p = percentage {
-            // percentage 语义按"已用百分比"处理(与 ZCode UI 一致),余量 = 1 - p
             frac = min(1, max(0, 1 - p / 100))
-        } else if let u = used, let c = cap, c > 0 {
+        } else if let u = usedNow, let c = cap, c > 0 {
             frac = min(1, max(0, 1 - u / c))
         }
 
         var detail: String? = nil
-        if let u = used, let c = cap {
-            detail = "已用 \(fmt(u)) / 上限 \(fmt(c)) \(unit)"
-        } else if let r = remaining {
-            detail = "剩余 \(fmt(r)) \(unit)"
+        if let c = cap {
+            let usedValue = usedNow ?? remaining.map { max(0, c - $0) } ?? percentage.map { c * $0 / 100 }
+            var text = "已用 \(usedValue.map { fmt($0) } ?? "?") / 额度 \(fmt(c)) credits"
+            if let p = percentage { text += " · 已用 \(fmt(p))%" }
+            detail = text
         } else if let p = percentage {
             detail = "已用 \(fmt(p))%"
         }
@@ -148,7 +155,7 @@ public struct GLMProvider: QuotaProvider {
             kind: kind,
             label: kind.defaultLabel,
             remainingFraction: frac,
-            remainingText: TimeFormat.countdown(to: reset) ?? (remaining.map { "剩 \(fmt($0)) \(unit)" }),
+            remainingText: TimeFormat.countdown(to: reset) ?? (remaining.map { "剩 \(fmt($0)) credits" }),
             resetsAt: reset,
             detail: detail,
             source: .server
