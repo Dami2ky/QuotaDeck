@@ -20,6 +20,19 @@ public enum WindowKind: String, Codable, CaseIterable {
     }
 }
 
+/// 数据出处(可信度标注的最小实现:服务端精确 / 本地估算)
+public enum QuotaSource: String, Codable {
+    case server
+    case localEstimate
+
+    public var label: String {
+        switch self {
+        case .server: return "精确"
+        case .localEstimate: return "估算"
+        }
+    }
+}
+
 /// 一条额度信息:5小时窗口 / 周窗口 / MCP / 余额
 public struct QuotaWindow: Identifiable, Codable, Hashable {
     public var kind: WindowKind
@@ -32,6 +45,8 @@ public struct QuotaWindow: Identifiable, Codable, Hashable {
     public var resetsAt: Date?
     /// 明细,如 "已用 30 / 120 prompts(本地估算)"
     public var detail: String?
+    /// 数据出处:服务端精确 / 本地估算(nil = 旧缓存数据,不标注)
+    public var source: QuotaSource?
 
     public var id: String { kind.rawValue + "|" + label }
 
@@ -41,7 +56,8 @@ public struct QuotaWindow: Identifiable, Codable, Hashable {
         remainingFraction: Double? = nil,
         remainingText: String? = nil,
         resetsAt: Date? = nil,
-        detail: String? = nil
+        detail: String? = nil,
+        source: QuotaSource? = nil
     ) {
         self.kind = kind
         self.label = label ?? kind.defaultLabel
@@ -49,6 +65,7 @@ public struct QuotaWindow: Identifiable, Codable, Hashable {
         self.remainingText = remainingText
         self.resetsAt = resetsAt
         self.detail = detail
+        self.source = source
     }
 }
 

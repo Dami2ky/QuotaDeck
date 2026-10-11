@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import QuotaDeckCore
 
 // MARK: - 管理窗口(左侧导航 + 四个页面)
@@ -158,6 +159,12 @@ struct WindowRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(window.label).font(.caption.weight(.medium))
+                if window.source == .localEstimate {
+                    Text("估算").font(.caption2)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+                        .foregroundStyle(.orange)
+                }
                 if let t = window.remainingText {
                     Text(t).font(.caption.monospacedDigit().weight(.semibold))
                 }
@@ -188,8 +195,74 @@ struct WindowRow: View {
 struct IntegrationsView: View {
     @ObservedObject var store: Store
 
+    static let familyTitles: [String: String] = [
+        "glm": "GLM / Z.ai",
+        "minimax": "MiniMax",
+        "deepseek": "DeepSeek",
+        "relays": "中转站",
+        "kimi": "Kimi",
+        "grok": "Grok",
+        "codex": "Codex",
+    ]
+
     var body: some View {
         Form {
+            Section("显示顺序(拖动或用箭头调整,总览 / 菜单栏 / 诊断同步生效)") {
+                ForEach(store.config.providerOrder, id: \.self) { fid in
+                    HStack {
+                        Label(Self.familyTitles[fid] ?? fid, systemImage: "line.3.horizontal")
+                        Spacer()
+                        Button {
+                            moveFamily(fid, -1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        Button {
+                            moveFamily(fid, +1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .onMove { from, to in
+                    store.config.providerOrder.move(fromOffsets: from, toOffset: to)
+                }
+            }
+
+            ForEach(store.config.providerOrder, id: \.self) { fid in
+                familySection(fid)
+            }
+
+            Section("通用") {
+                Stepper("刷新间隔:\(store.config.refreshIntervalSec) 秒",
+                        value: $store.config.refreshIntervalSec, in: 30...900, step: 30)
+                Text("配置文件:\(ConfigStore.configURL.path)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .formStyle(.grouped)
+        .onChange(of: store.config) { _, _ in
+            store.applyConfigChange()
+        }
+    }
+
+    /// 箭头按钮移动某家到上/下一个位置
+    private func moveFamily(_ fid: String, _ delta: Int) {
+        var order = store.config.providerOrder
+        guard let idx = order.firstIndex(of: fid) else { return }
+        let target = idx + delta
+        guard order.indices.contains(target) else { return }
+        order.swapAt(idx, target)
+        store.config.providerOrder = order
+    }
+
+    @ViewBuilder
+    private func familySection(_ fid: String) -> some View {
+        switch fid {
+        case "glm":
             Section("GLM / Z.ai · Coding Plan") {
                 Toggle("启用", isOn: $store.config.glm.enabled)
                 SecureField("API Key(bigmodel.cn 控制台)", text: $store.config.glm.apiKey)
@@ -202,8 +275,22 @@ struct IntegrationsView: View {
                 Toggle("无 Key 时本地估算(ZCode 用量库)", isOn: $store.config.glm.useLocalFallback)
                 Stepper("本地估算 5 小时上限:\(store.config.glm.assumed5hPromptLimit) prompts",
                         value: $store.config.glm.assumed5hPromptLimit, in: 20...500, step: 10)
+                Stepper("本地估算周上限:\(store.config.glm.assumedWeeklyPromptLimit) prompts",
+                        value: $store.config.glm.assumedWeeklyPromptLimit, in: 50...5000, step: 50)
             }
-
+        case "minimax":
+            Section("MiniMax · Token Plan 直连") {
+                Toggle("启用", isOn: $store.config.minimax.enabled)
+                SecureField("API Key(platform.minimaxi.com)", text: $store.config.minimax.apiKey)
+                Text("查询 api.minimaxi.com/v1/token_plan/remains。Claude Code 走 MiniMax 时已自动复用其 token;若查询报错,请改填平台控制台的 Key。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        case "deepseek":
+            Section("DeepSeek · 开放平台余额") {
+                Toggle("启用", isOn: $store.config.deepseek.enabled)
+                SecureField("API Key(sk-...,platform.deepseek.com)", text: $store.config.deepseek.apiKey)
+            }
+        case "relays":
             Section("中转站(new-api / one-api 兼容)") {
                 ForEach($store.config.relays, id: \.rid) { $relay in
                     GroupBox {
@@ -227,35 +314,25 @@ struct IntegrationsView: View {
                     store.config.relays.append(RelayConfig(name: "新中转站"))
                 }
             }
-
+        case "kimi":
             Section("Kimi · Coding Plan") {
                 Toggle("启用", isOn: $store.config.kimi.enabled)
                 SecureField("API Key(sk-kimi-...,Kimi Code 控制台)", text: $store.config.kimi.apiKey)
             }
-
+        case "grok":
             Section("Grok · xAI") {
                 Toggle("启用", isOn: $store.config.grok.enabled)
                 SecureField("API Key(console.x.ai)", text: $store.config.grok.apiKey)
             }
-
+        case "codex":
             Section("Codex · ChatGPT 订阅") {
                 Toggle("启用", isOn: $store.config.codex.enabled)
                 SecureField("访问令牌(留空则读本机 ~/.codex)", text: $store.config.codex.apiKey)
                 Text("本机 ~/.codex 为 API Key/中转模式时无订阅额度可查。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-
-            Section("通用") {
-                Stepper("刷新间隔:\(store.config.refreshIntervalSec) 秒",
-                        value: $store.config.refreshIntervalSec, in: 30...900, step: 30)
-                Text("配置文件:\(ConfigStore.configURL.path)")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-        }
-        .formStyle(.grouped)
-        .onChange(of: store.config) { _, _ in
-            store.applyConfigChange()
+        default:
+            EmptyView()
         }
     }
 }
@@ -287,6 +364,22 @@ struct StatsView: View {
 
 // MARK: - 诊断
 
+/// 原始响应美化:把每行内嵌的 JSON 解析后缩进展开,长文本随窗口宽度自动换行
+enum DiagFormat {
+    static func beautify(_ raw: String) -> String {
+        raw.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            guard let brace = line.firstIndex(of: "{") else { return String(line) }
+            let prefix = String(line[..<brace])
+            let jsonText = String(line[brace...])
+            guard let data = jsonText.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+                  let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
+            else { return String(line) }
+            return prefix + "\n" + String(decoding: pretty, as: UTF8.self)
+        }.joined(separator: "\n")
+    }
+}
+
 struct DiagnosticsView: View {
     @ObservedObject var store: Store
     @State private var selectedId: String?
@@ -298,24 +391,39 @@ struct DiagnosticsView: View {
                     Text(s.name).tag(Optional(s.id))
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
+            .frame(maxWidth: 360, alignment: .leading)
             .padding(12)
 
             if let status = store.statuses.first(where: { $0.id == selectedId }) {
-                ScrollView([.vertical, .horizontal]) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let err = status.errorMessage {
-                            Text("⚠ " + err)
-                                .foregroundStyle(.orange)
-                                .textSelection(.enabled)
-                        }
-                        Text(status.rawResponse ?? "(无原始响应)")
-                            .font(.system(.callout, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                HStack(spacing: 12) {
+                    if let err = status.errorMessage {
+                        Text("⚠ " + err)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer()
+                    Text(status.lastUpdated.map { "更新于 \($0.formatted(date: .omitted, time: .standard))" } ?? "")
+                        .foregroundStyle(.secondary)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(status.rawResponse ?? "", forType: .string)
+                    } label: {
+                        Label("复制", systemImage: "doc.on.doc")
+                    }
+                }
+                .font(.caption)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                // 仅纵向滚动:文本随窗口宽度自动换行,不再横向拖动
+                ScrollView(.vertical) {
+                    Text(DiagFormat.beautify(status.rawResponse ?? "(无原始响应)"))
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(EdgeInsets(top: 8, leading: 16, bottom: 16, trailing: 16))
                 }
             } else {
                 Text("选择一个接入查看原始响应")

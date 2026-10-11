@@ -17,34 +17,54 @@ extension QuotaProvider {
 }
 
 public enum ProviderRegistry {
-    /// 按配置装配全部 Provider(顺序即界面展示顺序)
-    public static func providers(for cfg: AppConfig) -> [QuotaProvider] {
-        var list: [QuotaProvider] = []
-        if cfg.glm.enabled { list.append(GLMProvider()) }
-        for relay in cfg.relays where relay.enabled {
-            list.append(RelayProvider(relay: relay))
+    static let knownFamilies = ["glm", "minimax", "deepseek", "relays", "kimi", "grok", "codex"]
+
+    /// 归一化用户排序:剔除未知项,缺失的家族按默认顺序补到末尾
+    public static func normalizedOrder(_ order: [String]) -> [String] {
+        var seen = Set<String>()
+        var out = order.filter { knownFamilies.contains($0) && seen.insert($0).inserted }
+        for f in knownFamilies where !seen.contains(f) {
+            out.append(f)
+            seen.insert(f)
         }
-        if cfg.kimi.enabled { list.append(KimiProvider()) }
-        if cfg.grok.enabled { list.append(GrokProvider()) }
-        if cfg.codex.enabled { list.append(CodexProvider()) }
-        return list
+        return out
     }
 
-    /// 未配置/停用的家也展示出来(置灰),让用户知道可以开
+    /// 按配置装配全部 Provider(顺序 = 用户排序)
+    public static func providers(for cfg: AppConfig) -> [QuotaProvider] {
+        var groups: [String: [QuotaProvider]] = [:]
+        if cfg.glm.enabled { groups["glm"] = [GLMProvider()] }
+        if cfg.minimax.enabled { groups["minimax"] = [MiniMaxProvider()] }
+        if cfg.deepseek.enabled { groups["deepseek"] = [DeepSeekProvider()] }
+        let activeRelays = cfg.relays.filter(\.enabled).map { RelayProvider(relay: $0) }
+        if !activeRelays.isEmpty { groups["relays"] = activeRelays }
+        if cfg.kimi.enabled { groups["kimi"] = [KimiProvider()] }
+        if cfg.grok.enabled { groups["grok"] = [GrokProvider()] }
+        if cfg.codex.enabled { groups["codex"] = [CodexProvider()] }
+        return normalizedOrder(cfg.providerOrder).flatMap { groups[$0] ?? [] }
+    }
+
+    /// 未配置/停用的家也展示出来(置灰),让用户知道可以开;顺序同用户排序
     public static func placeholderStatuses(for cfg: AppConfig) -> [ProviderStatus] {
-        var list: [ProviderStatus] = []
+        var byFamily: [String: [ProviderStatus]] = [:]
         if !cfg.glm.enabled {
-            list.append(ProviderStatus(id: "glm", name: "GLM / Z.ai", state: .disabled))
+            byFamily["glm"] = [ProviderStatus(id: "glm", name: "GLM / Z.ai", state: .disabled)]
+        }
+        if !cfg.minimax.enabled {
+            byFamily["minimax"] = [ProviderStatus(id: "minimax", name: "MiniMax", subtitle: "Token Plan · 直连", state: .notConfigured)]
+        }
+        if !cfg.deepseek.enabled {
+            byFamily["deepseek"] = [ProviderStatus(id: "deepseek", name: "DeepSeek", subtitle: "开放平台余额", state: .notConfigured)]
         }
         if !cfg.kimi.enabled {
-            list.append(ProviderStatus(id: "kimi", name: "Kimi", subtitle: "Coding Plan", state: .notConfigured))
+            byFamily["kimi"] = [ProviderStatus(id: "kimi", name: "Kimi", subtitle: "Coding Plan", state: .notConfigured)]
         }
         if !cfg.grok.enabled {
-            list.append(ProviderStatus(id: "grok", name: "Grok", subtitle: "xAI", state: .notConfigured))
+            byFamily["grok"] = [ProviderStatus(id: "grok", name: "Grok", subtitle: "xAI", state: .notConfigured)]
         }
         if !cfg.codex.enabled {
-            list.append(ProviderStatus(id: "codex", name: "Codex", subtitle: "ChatGPT 订阅", state: .notConfigured))
+            byFamily["codex"] = [ProviderStatus(id: "codex", name: "Codex", subtitle: "ChatGPT 订阅", state: .notConfigured)]
         }
-        return list
+        return normalizedOrder(cfg.providerOrder).flatMap { byFamily[$0] ?? [] }
     }
 }

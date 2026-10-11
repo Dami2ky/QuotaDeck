@@ -24,14 +24,17 @@ let sem = DispatchSemaphore(value: 0)
 var statuses: [ProviderStatus] = []
 
 Task {
-    statuses = await withTaskGroup(of: ProviderStatus.self) { group in
+    let collected = await withTaskGroup(of: ProviderStatus.self) { group in
         for p in providers {
             group.addTask { await p.fetch(cfg) }
         }
         var out: [ProviderStatus] = []
         for await s in group { out.append(s) }
-        return out.sorted { $0.name < $1.name }
+        return out
     }
+    // 输出顺序 = provider 列表顺序(即集成页的用户排序)
+    let byId = Dictionary(collected.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    statuses = providers.compactMap { byId[$0.id] }
     sem.signal()
 }
 sem.wait()

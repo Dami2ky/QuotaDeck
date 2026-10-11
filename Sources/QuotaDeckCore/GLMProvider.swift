@@ -44,7 +44,7 @@ public struct GLMProvider: QuotaProvider {
         }
 
         if !gotRemote, cfg.glm.useLocalFallback, let snap = ZCodeLocal.snapshot() {
-            // 本地估算
+            // 本地估算:5 小时窗口 + 周(7 天滚动)窗口
             let limit = max(1, cfg.glm.assumed5hPromptLimit)
             let frac = max(0, 1.0 - Double(snap.promptsInWindow) / Double(limit))
             status.windows.append(QuotaWindow(
@@ -52,7 +52,16 @@ public struct GLMProvider: QuotaProvider {
                 remainingFraction: frac,
                 remainingText: TimeFormat.countdown(to: snap.windowClosesAt) ?? "窗口未开启",
                 resetsAt: snap.windowClosesAt,
-                detail: "本地估算:窗口内 \(snap.promptsInWindow)/\(limit) prompts · 近24h \(snap.promptsIn24h) · 近7天 \(snap.promptsIn7d)"
+                detail: "本地估算:窗口内 \(snap.promptsInWindow)/\(limit) prompts · 近24h \(snap.promptsIn24h)",
+                source: .localEstimate
+            ))
+            let wLimit = max(1, cfg.glm.assumedWeeklyPromptLimit)
+            let wFrac = max(0, 1.0 - Double(snap.promptsIn7d) / Double(wLimit))
+            status.windows.append(QuotaWindow(
+                kind: .weekly,
+                remainingFraction: wFrac,
+                detail: "本地估算:近7天 \(snap.promptsIn7d)/\(wLimit) prompts",
+                source: .localEstimate
             ))
             status.subtitle = (status.subtitle ?? "") + " · 本地估算"
             raws.append("本地数据库: \(ZCodeLocal.dbURL.path)")
@@ -101,7 +110,7 @@ public struct GLMProvider: QuotaProvider {
         let percentage = JSON.double(limit, "percentage")
         let reset = JSON.date(limit, "nextResetTime")
 
-        let kind: WindowKind
+        var kind: WindowKind
         if type.uppercased().contains("TIME") || type.uppercased().contains("FIVE") || type.uppercased().contains("5H") {
             kind = .fiveHour
         } else if type.uppercased().contains("WEEK") {
@@ -110,6 +119,11 @@ public struct GLMProvider: QuotaProvider {
             kind = .mcp
         } else {
             kind = .other
+        }
+        // unit 数字语义(ClaudeBar 对照验证):3=5h 窗,6=周窗,7=月窗——type 识别不出时按 unit 兜底
+        if kind == .other, let u = JSON.double(limit, "unit") {
+            if u == 3 { kind = .fiveHour }
+            else if u == 6 { kind = .weekly }
         }
 
         var frac: Double?
@@ -127,6 +141,8 @@ public struct GLMProvider: QuotaProvider {
             detail = "已用 \(fmt(u)) / 上限 \(fmt(c)) \(unit)"
         } else if let r = remaining {
             detail = "剩余 \(fmt(r)) \(unit)"
+        } else if let p = percentage {
+            detail = "已用 \(fmt(p))%"
         }
         return QuotaWindow(
             kind: kind,
@@ -134,7 +150,8 @@ public struct GLMProvider: QuotaProvider {
             remainingFraction: frac,
             remainingText: TimeFormat.countdown(to: reset) ?? (remaining.map { "剩 \(fmt($0)) \(unit)" }),
             resetsAt: reset,
-            detail: detail
+            detail: detail,
+            source: .server
         )
     }
 

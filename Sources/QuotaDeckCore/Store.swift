@@ -73,6 +73,19 @@ public final class Store: ObservableObject {
         let known = Set(statuses.map(\.id))
         let extra = placeholders.filter { !activeIds.contains($0.id) && !known.contains($0.id) }
         statuses.append(contentsOf: extra)
+        sortStatusesByUserOrder()
+    }
+
+    /// 立即按用户排序重排(不等下一轮刷新);中转站条目归入 relays 槽位
+    func sortStatusesByUserOrder() {
+        let order = ProviderRegistry.normalizedOrder(config.providerOrder)
+        func rank(_ id: String) -> Int {
+            let family = id.hasPrefix("relay:") ? "relays" : id
+            return order.firstIndex(of: family) ?? order.count
+        }
+        statuses.sort {
+            rank($0.id) == rank($1.id) ? $0.name < $1.name : rank($0.id) < rank($1.id)
+        }
     }
 
     /// 启动定时刷新循环
@@ -125,18 +138,22 @@ public final class Store: ObservableObject {
         }
 
         var record = RefreshRecord(time: started, outcomes: [])
-        var merged: [ProviderStatus] = []
-        for (p, status, ms) in results.sorted(by: { $0.1.name < $1.1.name }) {
+        for (p, status, ms) in results {
             let ok = status.state == .ok
             record.outcomes.append(ProviderRefreshOutcome(
                 providerId: p.id, ok: ok, durationMs: ms,
                 error: ok ? nil : (status.errorMessage ?? "未知错误")
             ))
-            merged.append(status)
         }
-        // 保留未启用的占位
+        // 输出顺序 = provider 列表顺序(即用户排序)
+        var merged: [ProviderStatus] = []
+        let byId = Dictionary(results.map { ($0.1.id, $0.1) }, uniquingKeysWith: { first, _ in first })
+        merged = list.compactMap { byId[$0.id] }
+        // 保留未启用的占位;已停用/移除的中转站条目(id 动态)不残留
         let activeIds = Set(list.map(\.id))
-        merged.append(contentsOf: statuses.filter { !activeIds.contains($0.id) && $0.windows.isEmpty })
+        merged.append(contentsOf: statuses.filter {
+            !$0.id.hasPrefix("relay:") && !activeIds.contains($0.id) && $0.windows.isEmpty
+        })
         statuses = merged
         lastRefresh = started
         history.append(record)
