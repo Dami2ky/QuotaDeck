@@ -4,7 +4,7 @@ macOS 菜单栏应用:集中查看所有 AI Coding Plan 的 **5 小时余量 / �
 
 - 菜单栏常驻显示当前最紧张的额度(如 `GLM / Z.ai 5h 98%`)
 - 管理窗口四页:**总览**(卡片)/ **集成**(配置各家 key)/ **统计**(刷新历史)/ **诊断**(原始响应)
-- 纯 Swift(SPM + SwiftUI + libsqlite3),零第三方依赖,约 10MB
+- 纯 Swift(SPM + SwiftUI + libsqlite3),零第三方依赖,release 构建约 1.2MB
 
 ## 快速开始
 
