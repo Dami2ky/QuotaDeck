@@ -51,7 +51,10 @@ public struct MiniMaxProvider: QuotaProvider {
                 status.lastUpdated = Date()
                 return status
             }
-            status.windows = models.flatMap(Self.windows(for:))
+            // Coding Plan 用不了视频额度,video 条目恒为 100%,展示无意义,直接隐藏
+            status.windows = models
+                .filter { !(JSON.string($0, "model_name") ?? "").lowercased().contains("video") }
+                .flatMap(Self.windows(for:))
             if status.windows.isEmpty {
                 status.state = .error
                 status.errorMessage = "各模型均无有效余量字段(Key 可能无效或结构变化,见诊断)"

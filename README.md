@@ -29,7 +29,7 @@ swift run QuotaDeckCLI --raw      # 附带各接口原始响应
 | 家 | 数据来源 | 需要什么 |
 |---|---|---|
 | **GLM / Z.ai** | ① API:`GET https://open.bigmodel.cn/api/monitor/usage/quota/limit`(协议与 ZCode 官方一致,返回 `data.limits[]`,含 TIME_LIMIT 五小时窗口与周窗口的 usage/remaining/percentage/nextResetTime;团队版加 `?type=2`)② 无 key 回退:读 `~/.zcode/cli/db/db.sqlite` 的 `turn_usage` 表本地估算 **5 小时 + 周(7 天滚动)双窗口**(上限均可在集成页配置) | BigModel Coding Plan 的 API Key([bigmodel.cn 控制台](https://bigmodel.cn));不填也能本地估算 |
-| **MiniMax** | 官方 `GET https://api.minimaxi.com/v1/token_plan/remains`(Token Plan,每模型返回 5h + 周两条配额;注意 `current_interval_usage_count` 实为**剩余**数) | 无需手填——自动复用 Claude Code 的 MiniMax token;失效时改填 [platform.minimaxi.com](https://platform.minimaxi.com) 的 Key |
+| **MiniMax** | 官方 `GET https://api.minimaxi.com/v1/token_plan/remains`(Token Plan,每模型返回 5h + 周两条配额;注意 `current_interval_usage_count` 实为**剩余**数;Coding Plan 用不了视频额度,`video` 模型条目默认隐藏) | 无需手填——自动复用 Claude Code 的 MiniMax token;失效时改填 [platform.minimaxi.com](https://platform.minimaxi.com) 的 Key |
 | **DeepSeek** | 官方 `GET https://api.deepseek.com/user/balance`(已充值 + 赠送余额) | 开放平台 sk- key([platform.deepseek.com](https://platform.deepseek.com)) |
 | **中转站** | new-api/one-api 兼容计费接口:`/v1/dashboard/billing/subscription` + `/usage` | 站点地址 + sk- key;首次运行会自动从 `~/.claude/settings.json` 导入 Claude Code 正在用的中转 |
 | **Kimi** | 官方 `GET https://api.kimi.com/coding/v1/usages` | Kimi Code 控制台的 `sk-kimi-` key |
